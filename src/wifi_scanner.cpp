@@ -38,6 +38,22 @@ static uint64_t bssid_to_u64(const uint8_t* mac) {
          | ((uint64_t)mac[4] << 8)  | (uint64_t)mac[5];
 }
 
+// Lowercase an SSID and strip spaces/_/- for name matching. Mirrors
+// wifi_defense._norm_ssid / pineap_watch._norm_ssid on the Ragnar host so both
+// sides agree that "WiFi Pineapple", "wifi_pineapple" and "WiFiPineapple" are
+// the one Pineapple management-AP name.
+static String normSsid(const String& ssid) {
+    String out;
+    out.reserve(ssid.length());
+    for (size_t i = 0; i < ssid.length(); i++) {
+        char c = ssid[i];
+        if (c == ' ' || c == '_' || c == '-') continue;
+        if (c >= 'A' && c <= 'Z') c += 32;   // ASCII lowercase, no <cctype> dep
+        out += c;
+    }
+    return out;
+}
+
 static const char* authModeStr(wifi_auth_mode_t mode) {
     switch (mode) {
         case WIFI_AUTH_OPEN:            return "Open";
@@ -335,6 +351,63 @@ void wifi_scanner_check_pineapple() {
                     }
                 }
             }
+        }
+    }
+
+    // === PineAP "SSID pool": one BSSID advertising many distinct SSIDs ===
+    // The core Karma/PineAP-pool signature — a real Pineapple beacons/answers a
+    // large SSID pool from a single (or a few) radio MAC(s). Each pooled SSID
+    // shows up as a separate scan record sharing one BSSID, so group by BSSID
+    // and flag any that clears the pool threshold. This is the signature the old
+    // mixed-security check missed entirely (a pool is one BSSID, many names — not
+    // one name, many BSSIDs).
+    std::map<String, std::set<String>> bssidPool;   // BSSID -> distinct SSIDs
+    for (const auto& net : s_networks) {
+        if (net.ssid.length() == 0) continue;       // hidden SSIDs carry no name
+        bssidPool[net.bssid].insert(net.ssid);
+    }
+    for (const auto& pair : bssidPool) {
+        if ((int)pair.second.size() < PINEAP_POOL_MIN_SSIDS) continue;
+        int channel = 0;
+        String security = "?";
+        for (const auto& net : s_networks) {
+            if (net.bssid == pair.first) {
+                channel = net.channel;
+                security = net.security;
+                break;
+            }
+        }
+        // Same line protocol the Ragnar host (wardriving.py) already parses.
+        Serial.printf("Pineapple detected: SSID pool (%d SSIDs)\n",
+                      (int)pair.second.size());
+        Serial.printf("BSSID: %s\n", pair.first.c_str());
+        Serial.printf("Channel: %d\n", channel);
+        Serial.printf("Security: %s\n", security.c_str());
+        String sample;
+        int shown = 0;
+        for (const auto& s : pair.second) {
+            if (shown++ >= 6) break;
+            if (sample.length()) sample += ", ";
+            sample += s;
+        }
+        Serial.printf("SSIDs: %d (%s)\n", (int)pair.second.size(), sample.c_str());
+    }
+
+    // === Pineapple management AP: the Pineapple's own default SSID name ===
+    // A normalized name match to the Hak5 management AP — near-certain, but
+    // trivially renamed, so its absence proves nothing.
+    std::set<String> mgmtSeen;
+    for (const auto& net : s_networks) {
+        if (net.ssid.length() == 0) continue;
+        String n = normSsid(net.ssid);
+        if ((n == "wifipineapple" || n == "pineap" || n == "pineapple")
+                && !mgmtSeen.count(net.bssid)) {
+            mgmtSeen.insert(net.bssid);
+            Serial.printf("Pineapple detected: %s (management AP)\n",
+                          net.ssid.c_str());
+            Serial.printf("BSSID: %s\n", net.bssid.c_str());
+            Serial.printf("Channel: %d\n", net.channel);
+            Serial.printf("Security: %s\n", net.security.c_str());
         }
     }
 }
