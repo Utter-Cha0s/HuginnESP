@@ -18,6 +18,14 @@
 // Set to 0 to disable periodic checks (manual `pineap` command still works).
 #define PINEAPPLE_EVERY_N_DEFAULT 8
 
+// PineAP "SSID pool" threshold: the number of DISTINCT SSIDs advertised from a
+// single BSSID that marks a Karma/PineAP pool rather than a normal multi-SSID
+// router. A home AP puts 2-4 SSIDs (main/guest/IoT) on one BSSID; even a dense
+// enterprise controller rarely exceeds ~8. A Wi-Fi Pineapple's recon-fed pool
+// runs well past this. Mirrors wifi_defense._KARMA_SSID_MIN / pineap_watch on
+// the Ragnar host so both sides agree on the pool floor.
+#define PINEAP_POOL_MIN_SSIDS 5
+
 // ----- Wardrive mode -----
 #define WARDRIVE_WIFI_DURATION_MS 8000
 #define WARDRIVE_BLE_DURATION_MS  1500
